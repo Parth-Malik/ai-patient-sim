@@ -1,53 +1,37 @@
-// Determine the API URL (works for local and Vercel)
 const API_URL = '/chat';
 
-// --- SESSION MANAGEMENT ---
-// This generates a unique ID for each browser/tab.
-// This is the "Multi-User" feature in action.
-function getSessionId() {
-    let id = localStorage.getItem('patient_sim_id');
-    if (!id) {
-        id = 'user_' + Math.random().toString(36).substring(2, 9);
-        localStorage.setItem('patient_sim_id', id);
-    }
-    return id;
+// 1. Generate a random user ID so the backend remembers this specific chat
+let threadId = localStorage.getItem('userId');
+if (!threadId) {
+    threadId = 'user_' + Math.floor(Math.random() * 100000);
+    localStorage.setItem('userId', threadId);
 }
 
-const threadId = getSessionId();
+// 2. Grab HTML elements we need to control
 const chatBox = document.getElementById('chatBox');
-const userInput = document.getElementById('userInput');
+const inputField = document.getElementById('userInput');
 const sendBtn = document.getElementById('sendBtn');
-const typingIndicator = document.getElementById('typingIndicator');
 
-// --- UI FUNCTIONS ---
-
+// 3. Helper function to add a bubble to the chat
 function addMessage(text, sender) {
     const div = document.createElement('div');
-    div.classList.add('message', sender);
+    div.classList.add('message', sender); // adds class "message user" or "message bot"
     div.innerText = text;
     chatBox.appendChild(div);
-    chatBox.scrollTop = chatBox.scrollHeight;
+    chatBox.scrollTop = chatBox.scrollHeight; // Scroll to bottom
 }
 
-function setTyping(isTyping) {
-    if (isTyping) {
-        typingIndicator.classList.add('active');
-    } else {
-        typingIndicator.classList.remove('active');
-    }
-}
-
+// 4. Main function to send data
 async function sendMessage() {
-    const text = userInput.value.trim();
-    if (!text) return;
+    const text = inputField.value.trim();
+    if (!text) return; // Don't send empty messages
 
-    // 1. Optimistic UI Update
+    // Show user message immediately
     addMessage(text, 'user');
-    userInput.value = '';
-    setTyping(true);
+    inputField.value = ''; // Clear input
 
     try {
-        // 2. Send to Backend
+        // Send to Python backend
         const response = await fetch(API_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -58,22 +42,22 @@ async function sendMessage() {
         });
 
         const data = await response.json();
-        setTyping(false);
-
-        // 3. Handle Response
+        
+        // Show bot response
         if (data.error) {
-            addMessage("⚠️ Error: " + data.error, 'bot');
+            addMessage("Error: " + data.error, 'bot');
         } else {
             addMessage(data.response, 'bot');
         }
+
     } catch (error) {
-        setTyping(false);
-        addMessage("❌ Connection Error. Is the server running?", 'bot');
+        addMessage("Server error. Is the backend running?", 'bot');
     }
 }
 
-// Event Listeners
+// 5. Add event listeners (Click button OR press Enter)
 sendBtn.addEventListener('click', sendMessage);
-userInput.addEventListener('keypress', (e) => {
+
+inputField.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') sendMessage();
 });
