@@ -1,13 +1,10 @@
 import os
-import uuid
 import random
 import json
 import re
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
-
-# --- LANGCHAIN IMPORTS ---
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
 from langgraph.graph import StateGraph, END
@@ -15,179 +12,132 @@ from langgraph.checkpoint.memory import MemorySaver
 from typing import TypedDict, List, Annotated
 import operator
 
-# --- 1. CONFIGURATION ---
+# --- Config ---
 load_dotenv()
-keys_env = os.getenv("GROQ_API_KEYS")
-if not keys_env:
-    API_KEYS = ["dummy"]
-else:
-    API_KEYS = [k.strip() for k in keys_env.split(',') if k.strip()]
+keys = os.getenv("GROQ_API_KEYS")
+API_KEYS = [k.strip() for k in keys.split(',')] if keys else ["dummy"]
 
 app = Flask(__name__)
 CORS(app)
 
-# --- 2. THE CREATOR AGENT (Generates Patients) ---
-def get_random_llm(temperature=0.7):
-    """Helper to get a fresh model instance with a random key"""
-    active_key = random.choice(API_KEYS)
-    return ChatGroq(
-        api_key=active_key,
-        model="llama-3.1-8b-instant",
-        temperature=temperature
-    )
+# --- Helpers ---
+def get_llm(temp=0.7):
+    # Rotate keys for load balancing
+    return ChatGroq(api_key=random.choice(API_KEYS), model="llama-3.1-8b-instant", temperature=temp)
 
-def clean_and_parse_json(text):
-    """
-    CLEANER FUNCTION: Strips markdown (```json ... ```) from LLM output
-    to prevent JSON parsing errors.
-    """
-    # Remove markdown code blocks
-    text = re.sub(r'```json\s*', '', text)
-    text = re.sub(r'```', '', text)
-    text = text.strip()
-    
-    # Extract just the JSON object (between first { and last })
-    start = text.find('{')
-    end = text.rfind('}') + 1
-    if start != -1 and end != -1:
-        text = text[start:end]
-        
-    return json.loads(text)
+def parse_json(text):
+    # Clean markdown and extract valid JSON
+    text = re.sub(r'```json\s*|```', '', text).strip()
+    start, end = text.find('{'), text.rfind('}') + 1
+    return json.loads(text[start:end]) if start != -1 and end != -1 else {}
 
-def generate_unique_patient():
-    print("🧬 CREATOR AGENT: Inventing a new patient profile...")
-    
-    # Use max temperature for maximum variety
-    creator_model = get_random_llm(temperature=1.0)
+# --- Creator Agent (The Infinite Generator) ---
+def generate_patient():
+    print("Generating FRESH patient profile...")
+    llm = get_llm(1.0) # High temp = High creativity
     
     prompt = """
-    You are a Medical Simulation Architect.
-    Generate a unique, challenging patient case.
+    Invent a completely unique medical patient case. Do NOT reuse common diseases like Flu/Cold.
+    Pick rare or specific conditions (e.g., Vertigo, Gout, Appendicitis, Cluster Headache).
     
-    Return ONLY a valid JSON object with these exact keys:
+    Return ONLY valid JSON:
     {
         "name": "First Name",
         "age": Integer,
-        "disease": "Medical Condition Name",
-        "visible_symptoms": ["Symptom 1", "Symptom 2", "Symptom 3", "Symptom 4"],
-        "secret_symptom": "A critical symptom revealed only if asked",
+        "disease": "Specific Condition Name",
+        "visible_symptoms": ["Main Symptom", "Secondary Symptom", "Other Sign"],
+        "secret_symptom": "Critical clue revealed only if asked",
         "red_flags": "Emergency sign (e.g. fainting)",
-        "treatment": ["Correct Meds", "Correct Action"],
-        "personality": "One word mood (e.g. Anxious, Grumpy)"
+        "treatment": ["Correct Medication/Action"],
+        "personality": "Civil, direct, brief (e.g. Stoic, Anxious, Blunt)"
     }
-    
-    CONSTRAINTS:
-    1. "visible_symptoms" MUST contain at least 3 distinct items.
-    2. Do NOT use markdown. Do NOT write "Here is the JSON". Just the raw JSON.
+    Constraint: "visible_symptoms" must have at least 3 distinct items.
     """
     
     try:
-        response = creator_model.invoke(prompt)
-        # Use the robust cleaner
-        profile = clean_and_parse_json(response.content)
+        raw_output = llm.invoke(prompt).content
+        profile = parse_json(raw_output)
         
-        # Double check symptoms is a list
-        if isinstance(profile.get('visible_symptoms'), str):
+        # Ensure symptoms are a list
+        if isinstance(profile.get('visible_symptoms'), str): 
             profile['visible_symptoms'] = [profile['visible_symptoms']]
             
-        print(f"✅ CREATED: {profile['name']} - {profile['disease']}")
+        print(f"✅ Created: {profile['name']} - {profile['disease']}")
         return profile
     except Exception as e:
-        print(f"⚠️ Creation Failed: {e}. Falling back to backup.")
+        print(f"⚠️ Gen Failed: {e}")
+        # Emergency backup only
         return {
-            "name": "Fallback Frank",
-            "age": 55,
-            "disease": "Chronic Bronchitis",
-            "visible_symptoms": ["Heavy cough", "Wheezing", "Fatigue"],
-            "secret_symptom": "Smokes 2 packs a day",
-            "red_flags": "Blue lips",
-            "treatment": ["Inhaler", "Quit smoking"],
-            "personality": "Defensive"
+            "name": "Alex", "age": 30, "disease": "Unknown Viral Infection",
+            "visible_symptoms": ["Fever", "Rash", "Fatigue"],
+            "secret_symptom": "Travelled recently", "red_flags": "None",
+            "treatment": ["Fluids"], "personality": "Direct"
         }
 
-def build_system_prompt(profile):
-    """
-    Converts the JSON profile into the Actor's instructions.
-    """
-    symptoms_list = ", ".join(profile['visible_symptoms'])
-    
+def get_system_prompt(p):
     return f"""
-    SYSTEM ROLE: You are a patient named {profile['name']} ({profile['age']} years old).
+    ROLE: You are {p['name']} ({p['age']}). 
+    CONDITION: {p['disease']} (NEVER reveal this name).
+    SYMPTOMS: {", ".join(p['visible_symptoms'])}.
+    HIDDEN: {p['secret_symptom']} (Reveal only if asked).
+    TREATMENT: {", ".join(p['treatment'])}.
     
-    === YOUR HIDDEN TRUTH ===
-    CONDITION: {profile['disease']}
-    VISIBLE SYMPTOMS: {symptoms_list}
-    HIDDEN SYMPTOM (Hide this! Only reveal if asked): {profile['secret_symptom']}
-    RED FLAG (Escalate if this happens): {profile['red_flags']}
-    CORRECT TREATMENT: {', '.join(profile['treatment'])}
-    PERSONALITY: {profile['personality']}
-    
-    === RULES ===
-    1. ACTING: Stay in character ({profile['personality']}). Use plain English.
-    2. REVEALING: Start by mentioning your MAIN symptom. If asked "what else?", list the rest.
-    3. LYING: Do NOT say your disease name. If asked "Do you have {profile['disease']}?", say "I don't know."
-    4. CURE: If the doctor prescribes a CORRECT TREATMENT, accept it.
-    5. FAIL: If the doctor is rude or wrong, get annoyed.
-    
-    Start the conversation now.
+    INSTRUCTIONS:
+    1. Speak normally. Be brief and civil. No storytelling.
+    2. Start by stating your MAIN symptom only (e.g. "My head hurts.").
+    3. If asked for more, list the other symptoms briefly.
+    4. If asked about history/pain, answer truthfully based on your condition.
+    5. If the doctor gives the correct TREATMENT, say "Okay, thanks."
+    6. If the doctor is wrong/rude, correct them briefly.
     """
 
-# --- 3. THE ACTOR AGENT (Simulates the Patient) ---
-class AgentState(TypedDict):
+# --- Actor Agent (The Chatbot) ---
+class State(TypedDict):
     messages: Annotated[List, operator.add]
 
-def brain_node(state: AgentState):
-    messages = state["messages"]
-    model = get_random_llm(temperature=0.6)
-    
+def bot_node(state: State):
+    # Temp 0.5 keeps behavior consistent but phrasing natural
     try:
-        response = model.invoke(messages)
-        return {"messages": [response]}
-    except Exception as e:
+        return {"messages": [get_llm(0.5).invoke(state["messages"])]}
+    except:
         return {"messages": [HumanMessage(content="...")]}
 
-# Graph Setup
-workflow = StateGraph(AgentState)
-workflow.add_node("patient", brain_node)
-workflow.set_entry_point("patient")
-workflow.add_edge("patient", END)
-memory = MemorySaver()
-agent = workflow.compile(checkpointer=memory)
+flow = StateGraph(State)
+flow.add_node("patient", bot_node)
+flow.set_entry_point("patient")
+flow.add_edge("patient", END)
+agent = flow.compile(checkpointer=MemorySaver())
 
-# --- 4. FLASK ROUTES ---
-
+# --- Routes ---
 @app.route('/chat', methods=['POST'])
 def chat():
     data = request.json
-    user_input = data.get('message')
-    thread_id = data.get('thread_id')
-
-    if not user_input or not thread_id:
-        return jsonify({"error": "Bad Request"}), 400
-
-    config = {"configurable": {"thread_id": thread_id}}
-    inputs = [HumanMessage(content=user_input)]
+    uid, msg = data.get('thread_id'), data.get('message')
     
-    current_state = agent.get_state(config)
+    if not uid or not msg: return jsonify({"error": "Bad Request"}), 400
     
-    # If NO history, call the CREATOR AGENT
-    if not current_state.values or not current_state.values.get("messages"):
-        print(f"✨ New User {thread_id} detected.")
-        patient_profile = generate_unique_patient()
-        sys_prompt = build_system_prompt(patient_profile)
-        inputs = [SystemMessage(content=sys_prompt)] + inputs
-
+    config = {"configurable": {"thread_id": uid}}
+    inputs = [HumanMessage(content=msg)]
+    
+    # Check history. If empty -> New Patient
+    state = agent.get_state(config)
+    if not state.values:
+        print(f"✨ New User Session: {uid}")
+        p = generate_patient()
+        inputs = [SystemMessage(content=get_system_prompt(p))] + inputs
+        
     try:
-        result = agent.invoke({"messages": inputs}, config=config)
-        return jsonify({"response": result["messages"][-1].content})
+        res = agent.invoke({"messages": inputs}, config=config)
+        return jsonify({"response": res["messages"][-1].content})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# Static File Serving (Vercel/Local)
 @app.route('/')
-def serve_index(): return send_from_directory('.', 'index.html')
+def home(): return send_from_directory('.', 'index.html')
 
-@app.route('/<path:filename>')
-def serve_static(filename): return send_from_directory('.', filename)
+@app.route('/<path:f>')
+def static_files(f): return send_from_directory('.', f)
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
