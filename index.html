@@ -3,29 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Patient Simulator</title>
+    <title>Virtual Patient</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<div class="app-container">
-    <div class="header">
-        <h1><span class="status-indicator"></span>Patient Room 404</h1>
-    </div>
+    <div class="main-content">
+        <div class="chat-header">
+            <div class="brand-title">Patient</div>
+        </div>
 
-    <div class="chat-window" id="chatBox">
-        <div class="message bot">
-            (The patient looks uncomfortable) ... Hello doctor.
+        <div class="chat-box" id="chatBox">
+            <div class="message bot">
+                (The patient is waiting...)
+                <br><br>
+                "Hello doctor."
+            </div>
+        </div>
+
+        <div class="input-area">
+            <input type="text" id="userInput" placeholder="Type your question here...">
+            <button class="send-btn" id="sendBtn">Send</button>
         </div>
     </div>
-    <div class="typing-indicator" id="typingIndicator">Patient is thinking...</div>
 
-    <div class="input-area">
-        <input type="text" id="userInput" placeholder="Type a message...">
-        <button id="sendBtn">Send</button>
-    </div>
-</div>
-
-<script src="script.js"></script>
+    <script src="script.js"></script>
 </body>
 </html>
