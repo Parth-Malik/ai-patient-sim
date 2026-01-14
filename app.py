@@ -5,6 +5,8 @@ import re
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
+
+# --- LANGCHAIN IMPORTS ---
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
 from langgraph.graph import StateGraph, END
@@ -12,7 +14,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from typing import TypedDict, List, Annotated
 import operator
 
-# --- Config ---
+# --- 1. CONFIGURATION ---
 load_dotenv()
 keys = os.getenv("GROQ_API_KEYS")
 API_KEYS = [k.strip() for k in keys.split(',')] if keys else ["dummy"]
@@ -20,119 +22,144 @@ API_KEYS = [k.strip() for k in keys.split(',')] if keys else ["dummy"]
 app = Flask(__name__)
 CORS(app)
 
-# --- Helpers ---
+# Global store to send patient details to frontend
+patient_store = {} 
+
+# --- 2. HELPER FUNCTIONS ---
 def get_llm(temp=0.7):
-    # Rotate keys for load balancing
-    return ChatGroq(api_key=random.choice(API_KEYS), model="llama-3.1-8b-instant", temperature=temp)
+    return ChatGroq(
+        api_key=random.choice(API_KEYS), 
+        model="llama-3.1-8b-instant", 
+        temperature=temp
+    )
 
 def parse_json(text):
-    # Clean markdown and extract valid JSON
+    """Robust JSON cleaner"""
     text = re.sub(r'```json\s*|```', '', text).strip()
     start, end = text.find('{'), text.rfind('}') + 1
     return json.loads(text[start:end]) if start != -1 and end != -1 else {}
 
-# --- Creator Agent (The Infinite Generator) ---
+# --- 3. CREATOR AGENT (Generates Case) ---
 def generate_patient():
-    print("Generating FRESH patient profile...")
-    llm = get_llm(1.0) # High temp = High creativity
+    print("🧬 Generating FRESH patient case...")
+    # Max temperature for maximum variety
+    llm = get_llm(1.0) 
     
     prompt = """
-    Invent a completely unique medical patient case. Do NOT reuse common diseases like Flu/Cold.
-    Pick rare or specific conditions (e.g., Vertigo, Gout, Appendicitis, Cluster Headache).
+    Generate a random medical patient profile.
     
+    CRITICAL RULES FOR VARIETY:
+    1. Do NOT use "Common Cold", "Flu", or "COVID". 
+    2. Pick a specific condition from fields like Neurology, Cardiology, GI, Endocrine, or Orthopedics.
+    3. Make it realistic but distinct.
+
     Return ONLY valid JSON:
     {
         "name": "First Name",
         "age": Integer,
+        "sex": "Male/Female",
         "disease": "Specific Condition Name",
-        "visible_symptoms": ["Main Symptom", "Secondary Symptom", "Other Sign"],
+        "visible_symptoms": ["Main Symptom", "Secondary Symptom"],
         "secret_symptom": "Critical clue revealed only if asked",
-        "red_flags": "Emergency sign (e.g. fainting)",
+        "red_flags": "Emergency sign",
         "treatment": ["Correct Medication/Action"],
-        "personality": "Civil, direct, brief (e.g. Stoic, Anxious, Blunt)"
+        "personality": "Direct, Brief, No-nonsense"
     }
-    Constraint: "visible_symptoms" must have at least 3 distinct items.
     """
     
     try:
-        raw_output = llm.invoke(prompt).content
-        profile = parse_json(raw_output)
-        
-        # Ensure symptoms are a list
-        if isinstance(profile.get('visible_symptoms'), str): 
-            profile['visible_symptoms'] = [profile['visible_symptoms']]
-            
-        print(f"✅ Created: {profile['name']} - {profile['disease']}")
-        return profile
+        p = parse_json(llm.invoke(prompt).content)
+        # Ensure visible_symptoms is a list
+        if isinstance(p.get('visible_symptoms'), str): 
+            p['visible_symptoms'] = [p['visible_symptoms']]
+        print(f"✅ Created: {p['name']} - {p['disease']}")
+        return p
     except Exception as e:
-        print(f"⚠️ Gen Failed: {e}")
-        # Emergency backup only
+        print(f"⚠️ Generation Error: {e}")
         return {
-            "name": "Alex", "age": 30, "disease": "Unknown Viral Infection",
-            "visible_symptoms": ["Fever", "Rash", "Fatigue"],
-            "secret_symptom": "Travelled recently", "red_flags": "None",
-            "treatment": ["Fluids"], "personality": "Direct"
+            "name": "Alex", "age": 30, "sex": "Male",
+            "disease": "Migraine", 
+            "visible_symptoms": ["Severe headache", "Sensitivity to light"], 
+            "secret_symptom": "Nausea", 
+            "red_flags": "Vision loss", 
+            "treatment": ["Triptans"], 
+            "personality": "Stoic"
         }
 
 def get_system_prompt(p):
+    """
+    Defines the Actor's strict persona.
+    """
     return f"""
-    ROLE: You are {p['name']} ({p['age']}). 
-    CONDITION: {p['disease']} (NEVER reveal this name).
+    ROLE: You are {p['name']}, {p['age']} years old, {p['sex']}.
+    CONDITION: {p['disease']} (NEVER reveal the name).
     SYMPTOMS: {", ".join(p['visible_symptoms'])}.
     HIDDEN: {p['secret_symptom']} (Reveal only if asked).
-    TREATMENT: {", ".join(p['treatment'])}.
     
-    INSTRUCTIONS:
-    1. Speak normally. Be brief and civil. No storytelling.
-    2. Start by stating your MAIN symptom only (e.g. "My head hurts.").
-    3. If asked for more, list the other symptoms briefly.
-    4. If asked about history/pain, answer truthfully based on your condition.
-    5. If the doctor gives the correct TREATMENT, say "Okay, thanks."
-    6. If the doctor is wrong/rude, correct them briefly.
+    BEHAVIOR RULES:
+    1. BE CONCISE: Keep answers short (1-2 sentences max).
+    2. BE DIRECT: Do not tell stories. Do not use flowery language.
+    3. START: State your main symptom clearly.
+    4. HISTORY: Only answer history questions if asked.
+    5. CURE: If treated correctly ({", ".join(p['treatment'])}), say "Thank you, that helps." and end.
+    6. TONE: {p['personality']}. Human, but straight to the point.
     """
 
-# --- Actor Agent (The Chatbot) ---
+# --- 4. ACTOR AGENT (The Chatbot) ---
 class State(TypedDict):
     messages: Annotated[List, operator.add]
 
 def bot_node(state: State):
-    # Temp 0.5 keeps behavior consistent but phrasing natural
+    # Lower temp for consistent, concise answers
     try:
         return {"messages": [get_llm(0.5).invoke(state["messages"])]}
     except:
         return {"messages": [HumanMessage(content="...")]}
 
-flow = StateGraph(State)
-flow.add_node("patient", bot_node)
-flow.set_entry_point("patient")
-flow.add_edge("patient", END)
-agent = flow.compile(checkpointer=MemorySaver())
+# Graph Setup
+workflow = StateGraph(State)
+workflow.add_node("patient", bot_node)
+workflow.set_entry_point("patient")
+workflow.add_edge("patient", END)
+memory = MemorySaver()
+agent = workflow.compile(checkpointer=memory)
 
-# --- Routes ---
+# --- 5. ROUTES ---
+
 @app.route('/chat', methods=['POST'])
 def chat():
     data = request.json
     uid, msg = data.get('thread_id'), data.get('message')
     
-    if not uid or not msg: return jsonify({"error": "Bad Request"}), 400
+    if not uid or not msg: 
+        return jsonify({"error": "Bad Request"}), 400
     
     config = {"configurable": {"thread_id": uid}}
     inputs = [HumanMessage(content=msg)]
     
-    # Check history. If empty -> New Patient
+    # Check if New User
     state = agent.get_state(config)
     if not state.values:
-        print(f"✨ New User Session: {uid}")
+        print(f"✨ New Session: {uid}")
         p = generate_patient()
+        patient_store[uid] = p # Save for frontend display
         inputs = [SystemMessage(content=get_system_prompt(p))] + inputs
         
     try:
         res = agent.invoke({"messages": inputs}, config=config)
-        return jsonify({"response": res["messages"][-1].content})
+        
+        # Return Response + Patient Info for Header
+        return jsonify({
+            "response": res["messages"][-1].content,
+            "patient_info": {
+                "name": patient_store.get(uid, {}).get("name", "Unknown"),
+                "age": patient_store.get(uid, {}).get("age", "?"),
+                "sex": patient_store.get(uid, {}).get("sex", "?")
+            }
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Static File Serving (Vercel/Local)
 @app.route('/')
 def home(): return send_from_directory('.', 'index.html')
 
