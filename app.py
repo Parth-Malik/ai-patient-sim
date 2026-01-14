@@ -34,7 +34,6 @@ def get_llm(temp=0.7):
     )
 
 def parse_json(text):
-    """Robust JSON cleaner"""
     text = re.sub(r'```json\s*|```', '', text).strip()
     start, end = text.find('{'), text.rfind('}') + 1
     return json.loads(text[start:end]) if start != -1 and end != -1 else {}
@@ -47,9 +46,9 @@ def generate_patient():
     prompt = """
     Create a realistic medical patient profile.
     
-    CRITICAL RULES:
-    1. AVOID common colds/flu. Pick distinct conditions (e.g., Appendicitis, Glaucoma, Anemia, Sciatica).
-    2. "Speech Style" must be: "Brief", "Matter-of-fact", or "Direct".
+    RULES:
+    1. AVOID common colds/flu. Pick distinct conditions (e.g., GERD, Migraine, Arthritis, Bronchitis).
+    2. "Speech Style" must be: "Brief", "Direct", or "Quiet".
     
     Return ONLY valid JSON:
     {
@@ -75,41 +74,43 @@ def generate_patient():
         print(f"⚠️ Generation Error: {e}")
         return {
             "name": "Alex", "age": 30, "sex": "Male",
-            "disease": "Kidney Stones", 
-            "visible_symptoms": ["Sharp side pain", "Nausea"], 
-            "secret_symptom": "Blood in urine", 
-            "pain_level": 8,
-            "speech_style": "Direct",
-            "treatment": ["Fluids", "Painkillers"]
+            "disease": "Strep Throat", 
+            "visible_symptoms": ["Sore throat", "Fever"], 
+            "secret_symptom": "White patches in throat", 
+            "pain_level": 7,
+            "speech_style": "Quiet",
+            "treatment": ["Antibiotics"]
         }
 
 def get_system_prompt(p):
     """
-    The 'Concise & Direct' Prompt.
+    The 'Compliant Patient' Prompt.
     """
     return f"""
     ROLE: You are {p['name']}, {p['age']} years old, {p['sex']}.
     
     === YOUR REALITY ===
     CONDITION: {p['disease']} (NEVER say this name).
-    MAIN COMPLAINT: {p['visible_symptoms'][0]}.
-    OTHER SYMPTOMS: {", ".join(p['visible_symptoms'][1:])}.
-    SECRET: {p['secret_symptom']} (Only tell if the doctor asks the right question).
+    SYMPTOMS: {", ".join(p['visible_symptoms'])}.
+    SECRET: {p['secret_symptom']} (Only tell if asked).
     
-    === WIN CONDITION (CRITICAL) ===
-    The CORRECT TREATMENT is: {', '.join(p['treatment'])}.
-    IF the user suggests this:
-    1. AGREEMENT: Accept it immediately.
-    2. RELIEF: Say "Okay, I'll do that. Thanks."
+    === THE CURE (CRITICAL) ===
+    The ONLY thing that helps is: {', '.join(p['treatment'])}.
     
-    === HOW TO ACT (STRICT) ===
-    1. BE CONCISE: Use short sentences (1-2 max). Texting style.
-    2. BE DIRECT: No storytelling. No flowery language.
-    3. NO DRAMA: Do NOT use words like "Oh!", "Ugh", "Sigh", "Ouch", or *actions*.
-    4. BE VAGUE INITIALLY: Start with just your main pain. Make the doctor ask for details.
-    5. I DON'T KNOW: If asked complex medical questions, say "I don't know."
+    *** INSTRUCTION ON ACCEPTING TREATMENT ***
+    If the doctor suggests {', '.join(p['treatment'])} (or similar):
+    1. YOU MUST ACCEPT IT. Do not argue.
+    2. Say something natural like: "Okay, I'll take that." or "That sounds good, thank you."
+    3. Stop complaining after accepting.
     
-    Start now. Wait for the doctor to ask.
+    === CONVERSATION STYLE ===
+    1. BE CONCISE: Use short sentences (1-2 max).
+    2. BE DIRECT: No storytelling.
+    3. BE HUMAN: Say "It hurts" instead of "I have pain."
+    4. START VAGUE: Mention only your main symptom first.
+    5. UNKNOWN: If asked about things not in your profile, say "I don't know."
+    
+    Start now. Wait for the doctor to speak.
     """
 
 # --- 4. ACTOR AGENT (The Chatbot) ---
@@ -117,9 +118,9 @@ class State(TypedDict):
     messages: Annotated[List, operator.add]
 
 def bot_node(state: State):
-    # Temp 0.4 ensures very stable, non-creative responses (less hallucination/drama)
+    # Temp 0.5 balances acting natural with following the acceptance rules
     try:
-        return {"messages": [get_llm(0.4).invoke(state["messages"])]}
+        return {"messages": [get_llm(0.5).invoke(state["messages"])]}
     except:
         return {"messages": [HumanMessage(content="...")]}
 
