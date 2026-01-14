@@ -1,71 +1,78 @@
 const API_URL = '/chat';
 
-// --- 1. SESSION MANAGEMENT ---
-// Uses sessionStorage so every new tab gets a unique Patient ID.
-// Re-opening the same tab keeps the conversation.
-function getSessionID() {
-    let id = sessionStorage.getItem('medsim_id');
-    if (!id) {
-        id = 'user_' + Math.random().toString(36).substr(2, 9);
-        sessionStorage.setItem('medsim_id', id);
+// --- 1. TOKEN / SESSION MANAGEMENT ---
+// We use sessionStorage instead of localStorage.
+// sessionStorage is CLEARED when the tab is closed.
+// This guarantees a new patient every time you open a new tab.
+function getSessionToken() {
+    let token = sessionStorage.getItem('medsim_token');
+    if (!token) {
+        // Generate a random unique token for this tab
+        token = 'user_' + Math.floor(Math.random() * 1000000);
+        sessionStorage.setItem('medsim_token', token);
     }
-    return id;
+    return token;
 }
 
-const threadId = getSessionID();
+const threadId = getSessionToken(); // This is your unique session token
 const chatBox = document.getElementById('chatBox');
-const userInput = document.getElementById('userInput');
-const micBtn = document.getElementById('micBtn');
+const inputField = document.getElementById('userInput');
+const sendBtn = document.getElementById('sendBtn');
+// Grab the mic button (if it exists in your HTML)
+const micBtn = document.getElementById('micBtn'); 
 
 // --- 2. UI HELPER ---
-function addMsg(text, type) {
+function addMessage(text, sender) {
     const div = document.createElement('div');
-    div.className = `message ${type}`;
+    div.classList.add('message', sender); 
     div.innerText = text;
     chatBox.appendChild(div);
-    chatBox.scrollTop = chatBox.scrollHeight;
+    chatBox.scrollTop = chatBox.scrollHeight; 
 }
 
 // --- 3. SEND MESSAGE LOGIC ---
 async function sendMessage() {
-    const text = userInput.value.trim();
-    if (!text) return;
+    const text = inputField.value.trim();
+    if (!text) return; 
 
     // 1. Show user message
-    addMsg(text, 'user');
-    userInput.value = '';
+    addMessage(text, 'user');
+    inputField.value = ''; 
 
-    // 2. Send to Backend
     try {
-        const res = await fetch(API_URL, {
+        // 2. Send to Backend with our Unique Token
+        const response = await fetch(API_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: text, thread_id: threadId })
+            body: JSON.stringify({ 
+                message: text, 
+                thread_id: threadId // <--- The backend uses this to identify the patient
+            })
         });
+
+        const data = await response.json();
         
-        const data = await res.json();
-        
-        // 3. Show Bot Response
+        // 3. Show bot response
         if (data.error) {
-            addMsg("Error: " + data.error, 'bot');
+            addMessage("Error: " + data.error, 'bot');
         } else {
-            addMsg(data.response, 'bot');
+            addMessage(data.response, 'bot');
         }
 
-    } catch (e) {
-        addMsg("Connection Error. Is the server running?", 'bot');
+    } catch (error) {
+        addMessage("Server error. Is the backend running?", 'bot');
     }
 }
 
-// --- 4. SPEECH RECOGNITION (VOICE TO TEXT) ---
+// --- 4. SPEECH RECOGNITION (Voice to Text) ---
+// Checks if the browser supports speech (Chrome/Edge/Safari)
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
-if (SpeechRecognition) {
+if (SpeechRecognition && micBtn) {
     const recognition = new SpeechRecognition();
     recognition.continuous = false; // Stop listening after one sentence
     recognition.lang = 'en-US';
 
-    // Toggle recording on click
     micBtn.onclick = () => {
         if (micBtn.classList.contains('recording')) {
             recognition.stop();
@@ -74,39 +81,32 @@ if (SpeechRecognition) {
         }
     };
 
-    // Visual cues
     recognition.onstart = () => {
         micBtn.classList.add('recording');
-        userInput.placeholder = "Listening...";
+        inputField.placeholder = "Listening...";
     };
 
     recognition.onend = () => {
         micBtn.classList.remove('recording');
-        userInput.placeholder = "Type your question here...";
-        
-        // Optional: Auto-send if text was captured
-        if (userInput.value.trim().length > 0) {
+        inputField.placeholder = "Type your question here...";
+        // Optional: Auto-send if voice captured text
+        if (inputField.value.trim().length > 0) {
             sendMessage();
         }
     };
 
-    // Capture result
     recognition.onresult = (event) => {
         const transcript = event.results[0][0].transcript;
-        userInput.value = transcript;
+        inputField.value = transcript;
     };
-
-} else {
-    // If browser doesn't support speech, hide the mic button
+} else if (micBtn) {
     console.log("Web Speech API not supported.");
-    if(micBtn) micBtn.style.display = 'none';
+    micBtn.style.display = 'none'; // Hide button if not supported
 }
 
 // --- 5. EVENT LISTENERS ---
-// Send on Enter key
-userInput.onkeypress = (e) => {
-    if (e.key === 'Enter') sendMessage();
-};
+sendBtn.addEventListener('click', sendMessage);
 
-// Send on Button Click
-document.getElementById('sendBtn').onclick = sendMessage;
+inputField.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') sendMessage();
+});
