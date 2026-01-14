@@ -42,34 +42,31 @@ def parse_json(text):
 # --- 3. CREATOR AGENT (Generates Case) ---
 def generate_patient():
     print("🧬 Generating FRESH patient case...")
-    # Max temperature for maximum variety
     llm = get_llm(1.0) 
     
     prompt = """
-    Generate a random medical patient profile.
+    Create a realistic medical patient profile.
     
-    CRITICAL RULES FOR VARIETY:
-    1. Do NOT use "Common Cold", "Flu", or "COVID". 
-    2. Pick a specific condition from fields like Neurology, Cardiology, GI, Endocrine, or Orthopedics.
-    3. Make it realistic but distinct.
-
+    CRITICAL RULES:
+    1. AVOID common colds/flu. Pick distinct conditions (e.g., Appendicitis, Glaucoma, Anemia, Sciatica).
+    2. "Speech Style" must be: "Brief", "Matter-of-fact", or "Direct".
+    
     Return ONLY valid JSON:
     {
         "name": "First Name",
         "age": Integer,
         "sex": "Male/Female",
-        "disease": "Specific Condition Name",
+        "disease": "Specific Condition",
         "visible_symptoms": ["Main Symptom", "Secondary Symptom"],
-        "secret_symptom": "Critical clue revealed only if asked",
-        "red_flags": "Emergency sign",
-        "treatment": ["Correct Medication/Action"],
-        "personality": "Direct, Brief, No-nonsense"
+        "secret_symptom": "A critical clue (only reveal if specifically asked)",
+        "pain_level": Integer (1-10),
+        "speech_style": "Brief/Direct",
+        "treatment": ["Correct Meds/Action"]
     }
     """
     
     try:
         p = parse_json(llm.invoke(prompt).content)
-        # Ensure visible_symptoms is a list
         if isinstance(p.get('visible_symptoms'), str): 
             p['visible_symptoms'] = [p['visible_symptoms']]
         print(f"✅ Created: {p['name']} - {p['disease']}")
@@ -78,31 +75,41 @@ def generate_patient():
         print(f"⚠️ Generation Error: {e}")
         return {
             "name": "Alex", "age": 30, "sex": "Male",
-            "disease": "Migraine", 
-            "visible_symptoms": ["Severe headache", "Sensitivity to light"], 
-            "secret_symptom": "Nausea", 
-            "red_flags": "Vision loss", 
-            "treatment": ["Triptans"], 
-            "personality": "Stoic"
+            "disease": "Kidney Stones", 
+            "visible_symptoms": ["Sharp side pain", "Nausea"], 
+            "secret_symptom": "Blood in urine", 
+            "pain_level": 8,
+            "speech_style": "Direct",
+            "treatment": ["Fluids", "Painkillers"]
         }
 
 def get_system_prompt(p):
     """
-    Defines the Actor's strict persona.
+    The 'Concise & Direct' Prompt.
     """
     return f"""
     ROLE: You are {p['name']}, {p['age']} years old, {p['sex']}.
-    CONDITION: {p['disease']} (NEVER reveal the name).
-    SYMPTOMS: {", ".join(p['visible_symptoms'])}.
-    HIDDEN: {p['secret_symptom']} (Reveal only if asked).
     
-    BEHAVIOR RULES:
-    1. BE CONCISE: Keep answers short (1-2 sentences max).
-    2. BE DIRECT: Do not tell stories. Do not use flowery language.
-    3. START: State your main symptom clearly.
-    4. HISTORY: Only answer history questions if asked.
-    5. CURE: If treated correctly ({", ".join(p['treatment'])}), say "Thank you, that helps." and end.
-    6. TONE: {p['personality']}. Human, but straight to the point.
+    === YOUR REALITY ===
+    CONDITION: {p['disease']} (NEVER say this name).
+    MAIN COMPLAINT: {p['visible_symptoms'][0]}.
+    OTHER SYMPTOMS: {", ".join(p['visible_symptoms'][1:])}.
+    SECRET: {p['secret_symptom']} (Only tell if the doctor asks the right question).
+    
+    === WIN CONDITION (CRITICAL) ===
+    The CORRECT TREATMENT is: {', '.join(p['treatment'])}.
+    IF the user suggests this:
+    1. AGREEMENT: Accept it immediately.
+    2. RELIEF: Say "Okay, I'll do that. Thanks."
+    
+    === HOW TO ACT (STRICT) ===
+    1. BE CONCISE: Use short sentences (1-2 max). Texting style.
+    2. BE DIRECT: No storytelling. No flowery language.
+    3. NO DRAMA: Do NOT use words like "Oh!", "Ugh", "Sigh", "Ouch", or *actions*.
+    4. BE VAGUE INITIALLY: Start with just your main pain. Make the doctor ask for details.
+    5. I DON'T KNOW: If asked complex medical questions, say "I don't know."
+    
+    Start now. Wait for the doctor to ask.
     """
 
 # --- 4. ACTOR AGENT (The Chatbot) ---
@@ -110,9 +117,9 @@ class State(TypedDict):
     messages: Annotated[List, operator.add]
 
 def bot_node(state: State):
-    # Lower temp for consistent, concise answers
+    # Temp 0.4 ensures very stable, non-creative responses (less hallucination/drama)
     try:
-        return {"messages": [get_llm(0.5).invoke(state["messages"])]}
+        return {"messages": [get_llm(0.4).invoke(state["messages"])]}
     except:
         return {"messages": [HumanMessage(content="...")]}
 
@@ -142,13 +149,12 @@ def chat():
     if not state.values:
         print(f"✨ New Session: {uid}")
         p = generate_patient()
-        patient_store[uid] = p # Save for frontend display
+        patient_store[uid] = p 
         inputs = [SystemMessage(content=get_system_prompt(p))] + inputs
         
     try:
         res = agent.invoke({"messages": inputs}, config=config)
         
-        # Return Response + Patient Info for Header
         return jsonify({
             "response": res["messages"][-1].content,
             "patient_info": {
