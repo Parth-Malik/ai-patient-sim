@@ -10,7 +10,12 @@
 
     <div class="main-content">
         <div class="chat-header">
-            <div class="brand-title">Patient</div>
+            <div class="brand-title">Patient Room</div>
+            
+            <div class="header-actions">
+                <button class="action-btn end-btn" onclick="endSession()">End Session</button>
+                <button class="action-btn new-btn" onclick="startNewSession()">New Patient</button>
+            </div>
         </div>
 
         <div class="chat-box" id="chatBox">
@@ -21,9 +26,17 @@
             </div>
         </div>
 
-        <div class="input-area">
+        <div class="input-area" id="inputArea">
             <input type="text" id="userInput" placeholder="Type your question here...">
             <button class="send-btn" id="sendBtn">Send</button>
+        </div>
+
+        <div id="endOverlay" class="overlay hidden">
+            <div class="overlay-content">
+                <h2>Simulation Ended</h2>
+                <p>The session is closed. You can no longer interact with this patient.</p>
+                <button class="restart-btn" onclick="startNewSession()">Start New Case</button>
+            </div>
         </div>
     </div>
 
