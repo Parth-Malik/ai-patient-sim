@@ -1,148 +1,90 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
-
-:root {
-    --primary-color: #6366f1;
-    --bg-gradient: linear-gradient(135deg, #a5b4fc 0%, #6366f1 100%);
-    --glass-bg: rgba(255, 255, 255, 0.95);
-    --glass-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
-}
-
+/* Use a nice system font */
 body {
-    background: var(--bg-gradient);
-    font-family: 'Inter', sans-serif;
-    height: 100vh;
+    background-color: #f0f2f5;
+    font-family: sans-serif;
     margin: 0;
     display: flex;
-    align-items: center;
-    justify-content: center;
+    justify-content: center; /* Center horizontally */
+    align-items: center;     /* Center vertically */
+    height: 100vh;           /* Full screen height */
 }
 
+/* The main phone-like container */
 .app-container {
-    width: 420px;
+    width: 400px;
     height: 700px;
-    background: var(--glass-bg);
-    border-radius: 24px;
-    box-shadow: var(--glass-shadow);
+    background: white;
+    border-radius: 20px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.1);
     display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    position: relative;
+    flex-direction: column; /* Stack header, chat, input vertically */
+    overflow: hidden;       /* Hide anything spilling out */
 }
 
 .header {
-    padding: 20px;
+    background: #f8f9fa;
+    padding: 15px;
     text-align: center;
-    border-bottom: 1px solid rgba(0,0,0,0.05);
-    background: rgba(255,255,255,0.5);
+    border-bottom: 1px solid #ddd;
 }
 
-.header h1 {
-    margin: 0;
-    font-size: 1.1rem;
-    color: #1f2937;
-    font-weight: 600;
-}
-
-.status-indicator {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    background: #10b981;
-    border-radius: 50%;
-    margin-right: 8px;
-}
-
-.chat-window {
-    flex: 1;
+.chat-box {
+    flex: 1;              /* Take up all available space */
     padding: 20px;
-    overflow-y: auto;
+    overflow-y: auto;     /* Scroll if messages are too long */
     display: flex;
     flex-direction: column;
-    gap: 15px;
-    scroll-behavior: smooth;
+    gap: 10px;            /* Space between messages */
+    background-color: #fff;
 }
 
+/* Common style for all messages */
 .message {
-    max-width: 85%;
-    padding: 12px 16px;
-    border-radius: 18px;
-    font-size: 0.95rem;
-    line-height: 1.5;
-    animation: fadeIn 0.3s ease;
+    padding: 10px 15px;
+    border-radius: 15px;
+    max-width: 80%;
+    line-height: 1.4;
+    font-size: 14px;
 }
 
-@keyframes fadeIn {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
-}
-
+/* Specific styles for Bot vs User */
 .bot {
-    background: #f3f4f6;
-    color: #1f2937;
-    align-self: flex-start;
-    border-bottom-left-radius: 4px;
+    background-color: #e4e6eb; /* Light gray */
+    color: black;
+    align-self: flex-start;    /* Stick to left */
 }
 
 .user {
-    background: var(--primary-color);
+    background-color: #0084ff; /* Messenger Blue */
     color: white;
-    align-self: flex-end;
-    border-bottom-right-radius: 4px;
-    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);
+    align-self: flex-end;      /* Stick to right */
 }
 
-.typing-indicator {
-    font-size: 0.8rem;
-    color: #9ca3af;
-    margin-left: 10px;
-    font-style: italic;
-    opacity: 0;
-    transition: opacity 0.2s;
-}
-
-.typing-indicator.active {
-    opacity: 1;
-}
-
+/* Area at the bottom */
 .input-area {
-    padding: 20px;
-    background: white;
+    padding: 15px;
+    border-top: 1px solid #ddd;
     display: flex;
     gap: 10px;
-    border-top: 1px solid rgba(0,0,0,0.05);
 }
 
 input {
-    flex: 1;
-    padding: 12px 18px;
-    border-radius: 99px;
-    border: 1px solid #e5e7eb;
+    flex: 1; /* Grow to fill space */
+    padding: 10px;
+    border-radius: 20px;
+    border: 1px solid #ccc;
     outline: none;
-    font-size: 0.95rem;
-    transition: border-color 0.2s;
-}
-
-input:focus {
-    border-color: var(--primary-color);
 }
 
 button {
-    background: var(--primary-color);
+    background-color: #0084ff;
     color: white;
     border: none;
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
+    padding: 10px 20px;
+    border-radius: 20px;
     cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: transform 0.1s;
 }
 
-button:hover { transform: scale(1.05); }
-button:active { transform: scale(0.95); }
-
-/* Scrollbar styling */
-.chat-window::-webkit-scrollbar { width: 5px; }
-.chat-window::-webkit-scrollbar-thumb { background: #e5e7eb; border-radius: 10px; }
+button:hover {
+    background-color: #006bcf; /* Darker blue on hover */
+}
