@@ -21,46 +21,47 @@ import operator
 
 # --- CONFIGURATION ---
 load_dotenv()
-keys = os.getenv("GROQ_API_KEYS")
-API_KEYS = [k.strip() for k in keys.split(',')] if keys else ["dummy"]
+# Support multiple keys for rotation or single key
+keys_env = os.getenv("GROQ_API_KEYS")
+api_keys = [k.strip() for k in keys_env.split(',')] if keys_env else ["dummy_key"]
 
 # DB SETUP
-MONGO_URI = None
-SECRET_KEY = os.getenv("SECRET_KEY", "super_secret_key")
+mongo_uri = os.getenv("MONGO_URI")
+secret_key = os.getenv("SECRET_KEY", "super_secret_key")
 
 app = Flask(__name__)
 CORS(app)
 bcrypt = Bcrypt(app)
 
 # --- HYBRID DATABASE LOGIC ---
-# We try to connect to Mongo. If it fails, we fall back to a Python Dictionary.
-USE_MONGO = False
+use_mongo = False
 db_client = None
 users_col = None
 sessions_col = None
 
-# In-Memory Fallback
-RAM_DB = {
+# RAM fallback
+ram_db = {
     "users": [],
     "sessions": []
 }
 
-if MONGO_URI:
+if mongo_uri:
     try:
-        db_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000) # 5s timeout
-        # Test connection
-        db_client.server_info()
+        db_client = MongoClient(mongo_uri, serverSelectionTimeoutMS=3000)
+        db_client.server_info() # Trigger connection check
         print("✅ CONNECTED TO MONGODB ATLAS")
+        
         db = db_client.medsim_db
         users_col = db.users
         sessions_col = db.sessions
-        USE_MONGO = True
+        use_mongo = True
     except ServerSelectionTimeoutError:
         print("⚠️ MONGODB CONNECTION FAILED. Falling back to In-Memory mode.")
-        USE_MONGO = False
+        use_mongo = False
 else:
     print("⚠️ NO MONGO_URI FOUND. Using In-Memory mode.")
-    USE_MONGO = False
+    use_mongo = False
+
 
 # --- AUTH ROUTES ---
 
@@ -75,26 +76,27 @@ def register():
     
     hashed_pw = bcrypt.generate_password_hash(password).decode('utf-8')
     
-    if USE_MONGO:
+    if use_mongo:
         if users_col.find_one({"username": username}):
             return jsonify({"error": "User already exists"}), 400
         
         uid = users_col.insert_one({
-            "username": username, "password": hashed_pw, "created_at": datetime.datetime.now()
+            "username": username, 
+            "password": hashed_pw, 
+            "created_at": datetime.datetime.now()
         }).inserted_id
         return jsonify({"message": "User created", "user_id": str(uid)}), 201
     else:
-        # RAM Fallback
-        for u in RAM_DB["users"]:
+        for u in ram_db["users"]:
             if u["username"] == username:
                 return jsonify({"error": "User already exists"}), 400
         
         new_user = {
-            "_id": "user_" + str(len(RAM_DB["users"])),
+            "_id": "user_" + str(len(ram_db["users"])),
             "username": username,
             "password": hashed_pw
         }
-        RAM_DB["users"].append(new_user)
+        ram_db["users"].append(new_user)
         return jsonify({"message": "User created (RAM)", "user_id": new_user["_id"]}), 201
 
 @app.route('/login', methods=['POST'])
@@ -105,22 +107,20 @@ def login():
     
     user = None
     
-    if USE_MONGO:
+    if use_mongo:
         user = users_col.find_one({"username": username})
     else:
-        # RAM Fallback
-        for u in RAM_DB["users"]:
+        for u in ram_db["users"]:
             if u["username"] == username:
                 user = u
                 break
     
     if user and bcrypt.check_password_hash(user['password'], password):
-        # Determine User ID (Mongo uses ObjectId, RAM uses string)
         uid = str(user['_id'])
         token = jwt.encode({
             'user_id': uid,
             'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=24)
-        }, SECRET_KEY, algorithm="HS256")
+        }, secret_key, algorithm="HS256")
         
         return jsonify({
             "message": "Login successful",
@@ -131,10 +131,12 @@ def login():
     
     return jsonify({"error": "Invalid credentials"}), 401
 
+
 # --- HELPER FUNCTIONS ---
+
 def get_llm(temp=0.7):
     return ChatGroq(
-        api_key=random.choice(API_KEYS), 
+        api_key=random.choice(api_keys), 
         model="llama-3.1-8b-instant", 
         temperature=temp
     )
@@ -142,51 +144,88 @@ def get_llm(temp=0.7):
 def parse_json(text):
     text = re.sub(r'```json\s*|```', '', text).strip()
     start, end = text.find('{'), text.rfind('}') + 1
-    return json.loads(text[start:end]) if start != -1 and end != -1 else {}
+    if start != -1 and end != -1:
+        return json.loads(text[start:end])
+    return {}
 
 # --- CREATOR AGENT ---
+
 def generate_patient():
     print("🧬 Generating FRESH patient case...")
     llm = get_llm(1.0) 
     prompt = """
     Create a realistic medical patient profile.
-    RULES: Avoid colds/flu. Pick distinct conditions (e.g. GERD, Migraine).
+    RULES: Avoid common colds. Pick distinct conditions (e.g., IBS, Migraine, Eczema, Sciatica).
     Return ONLY valid JSON:
     {
         "name": "First Name",
         "age": Integer,
         "sex": "Male/Female",
         "disease": "Specific Condition",
-        "visible_symptoms": ["Main Symptom", "Secondary Symptom"],
-        "secret_symptom": "Critical clue",
-        "pain_description": "Sensory adjectives",
-        "speech_style": "Natural/Casual",
+        "visible_symptoms": ["Main Symptom", "Secondary Symptom", "Tertiary Symptom"],
+        "secret_symptom": "Critical clue (only reveal if specifically asked)",
+        "pain_description": "Sensory adjectives (e.g. sharp, burning)",
         "treatment": ["Correct Meds"]
     }
     """
     try:
         p = parse_json(llm.invoke(prompt).content)
-        if isinstance(p.get('visible_symptoms'), str): p['visible_symptoms'] = [p['visible_symptoms']]
+        if isinstance(p.get('visible_symptoms'), str): 
+            p['visible_symptoms'] = [p['visible_symptoms']]
         return p
     except:
-        return {"name": "Alex", "age": 30, "sex": "Male", "disease": "Headache", "visible_symptoms": ["Pain"], "secret_symptom": "Stress", "pain_description": "Throbbing", "speech_style": "Tired", "treatment": ["Rest"]}
+        return {
+            "name": "Alex", "age": 30, "sex": "Male", 
+            "disease": "Migraine", 
+            "visible_symptoms": ["Headache", "Light sensitivity"], 
+            "secret_symptom": "Nausea", 
+            "pain_description": "Throbbing", 
+            "treatment": ["Triptans"]
+        }
 
 def get_system_prompt(p):
+    """
+    STRICT NO-DRAMA PROMPT
+    This ensures the bot speaks like a normal person texting, not an actor.
+    """
     return f"""
     ROLE: You are {p['name']}, {p['age']} years old, {p['sex']}.
-    REALITY: Condition {p['disease']} (NEVER say name). Symptoms: {", ".join(p['visible_symptoms'])}.
-    PAIN: {p.get('pain_description', 'bad')}. SECRET: {p['secret_symptom']}.
-    CURE: {', '.join(p['treatment'])}. Accept if offered.
-    STYLE: Descriptive, natural, sensory details.
+    CONTEXT: You are messaging a doctor on a chat app.
+    
+    === YOUR CONDITION ===
+    Disease: {p['disease']} (NEVER reveal this name).
+    Main Symptom: {p['visible_symptoms'][0]}.
+    Other Symptoms: {", ".join(p['visible_symptoms'][1:])}.
+    Secret: {p['secret_symptom']} (Only say if explicitly asked).
+    Pain feels like: {p.get('pain_description', 'bad')}.
+    
+    === THE CURE ===
+    The ONLY thing that helps is: {', '.join(p['treatment'])}.
+    IF the doctor suggests this:
+    1. Say: "Okay, I'll try that." or "Thanks doc."
+    2. STOP complaining.
+    
+    === STRICT BEHAVIOR RULES ===
+    1. NO ACTING: Do NOT use asterisks (*sigh*, *looks down*). Do NOT describe your actions. Just type words.
+    2. TEXTING STYLE: Keep sentences short and casual.
+    3. NO INFO DUMPING: Only mention your Main Symptom at first. Make the doctor ask for more.
+       - BAD: "Hi, I have a headache, nausea, and my eye hurts."
+       - GOOD: "Hi doc, I've had this really bad headache all day."
+    4. UNKNOWN: If asked about history not in your profile, say "No" or "I don't think so."
+    
+    Start now. Wait for the doctor to speak.
     """
 
+
 # --- ACTOR AGENT ---
+
 class State(TypedDict):
     messages: Annotated[List, operator.add]
 
 def bot_node(state: State):
     try:
-        return {"messages": [get_llm(0.6).invoke(state["messages"])]}
+        # Lower temp (0.4) reduces chance of "hallucinating" drama
+        return {"messages": [get_llm(0.4).invoke(state["messages"])]}
     except:
         return {"messages": [HumanMessage(content="...")]}
 
@@ -197,7 +236,8 @@ workflow.add_edge("patient", END)
 memory = MemorySaver()
 agent = workflow.compile(checkpointer=memory)
 
-# --- 6. CHAT ROUTES ---
+
+# --- CHAT ROUTES ---
 
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -206,68 +246,74 @@ def chat():
     tid = data.get('thread_id')
     msg = data.get('message')
     
-    if not uid or not tid or not msg: return jsonify({"error": "Bad Request"}), 400
+    if not all([uid, tid, msg]):
+        return jsonify({"error": "Bad Request"}), 400
     
     config = {"configurable": {"thread_id": tid}}
     
-    # --- GET OR CREATE SESSION ---
+    # Retrieve session
     session = None
-    if USE_MONGO:
+    if use_mongo:
         session = sessions_col.find_one({"thread_id": tid})
     else:
-        # RAM Fallback
-        for s in RAM_DB["sessions"]:
+        for s in ram_db["sessions"]:
             if s["thread_id"] == tid:
                 session = s
                 break
     
     if not session:
-        # New Session
+        # Create new session
         p = generate_patient()
         new_session = {
-            "thread_id": tid, "user_id": uid, 
-            "patient_name": p['name'], "disease": p['disease'],
-            "patient_data": p, "messages": [], "created_at": datetime.datetime.now()
+            "thread_id": tid, 
+            "user_id": uid, 
+            "patient_name": p['name'], 
+            "disease": p['disease'],
+            "patient_data": p, 
+            "messages": [], 
+            "created_at": datetime.datetime.now()
         }
         
-        if USE_MONGO:
+        if use_mongo:
             sessions_col.insert_one(new_session)
         else:
-            RAM_DB["sessions"].append(new_session)
+            ram_db["sessions"].append(new_session)
             
         inputs = [SystemMessage(content=get_system_prompt(p)), HumanMessage(content=msg)]
         current_p = p
     else:
-        # Existing Session
+        # Continue session
         current_p = session['patient_data']
         inputs = [HumanMessage(content=msg)]
 
-    # --- RUN AGENT ---
     try:
         res = agent.invoke({"messages": inputs}, config=config)
         bot_response = res["messages"][-1].content
         
-        # --- SAVE HISTORY ---
+        # Save history
         new_msgs = [
             {"role": "Doctor", "content": msg},
             {"role": "Patient", "content": bot_response}
         ]
         
-        if USE_MONGO:
+        if use_mongo:
             sessions_col.update_one(
                 {"thread_id": tid},
                 {"$push": {"messages": {"$each": new_msgs}}}
             )
         else:
-            # RAM Update
-            for s in RAM_DB["sessions"]:
+            for s in ram_db["sessions"]:
                 if s["thread_id"] == tid:
                     s["messages"].extend(new_msgs)
                     break
                     
         return jsonify({
             "response": bot_response,
-            "patient_info": {"name": current_p["name"], "age": current_p["age"], "sex": current_p["sex"]}
+            "patient_info": {
+                "name": current_p["name"], 
+                "age": current_p["age"], 
+                "sex": current_p["sex"]
+            }
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -276,7 +322,7 @@ def chat():
 def get_sessions(user_id):
     results = []
     
-    if USE_MONGO:
+    if use_mongo:
         cursor = sessions_col.find({"user_id": user_id}).sort("created_at", -1)
         for doc in cursor:
             results.append({
@@ -285,8 +331,7 @@ def get_sessions(user_id):
                 "disease": doc["disease"]
             })
     else:
-        # RAM Fallback
-        for s in reversed(RAM_DB["sessions"]):
+        for s in reversed(ram_db["sessions"]):
             if s["user_id"] == user_id:
                 results.append({
                     "thread_id": s["thread_id"],
@@ -297,10 +342,12 @@ def get_sessions(user_id):
     return jsonify(results)
 
 @app.route('/')
-def home(): return send_from_directory('.', 'index.html')
+def home():
+    return send_from_directory('.', 'index.html')
 
 @app.route('/<path:f>')
-def static_files(f): return send_from_directory('.', f)
+def static_files(f):
+    return send_from_directory('.', f)
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
