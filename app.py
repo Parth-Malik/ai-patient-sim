@@ -11,7 +11,7 @@ from flask_bcrypt import Bcrypt
 from pymongo import MongoClient
 from pymongo.errors import ServerSelectionTimeoutError
 
-# --- LANGCHAIN IMPORTS ---
+# LangChain imports
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
 from langgraph.graph import StateGraph, END
@@ -19,21 +19,22 @@ from langgraph.checkpoint.memory import MemorySaver
 from typing import TypedDict, List, Annotated
 import operator
 
-# --- CONFIGURATION ---
+# Load env vars
 load_dotenv()
-# Support multiple keys for rotation or single key
+
+# Setup Groq keys - supports rotation
 keys_env = os.getenv("GROQ_API_KEYS")
 api_keys = [k.strip() for k in keys_env.split(',')] if keys_env else ["dummy_key"]
 
-# DB SETUP
+# Database config
 mongo_uri = os.getenv("MONGO_URI")
-secret_key = os.getenv("SECRET_KEY", "super_secret_key")
+secret_key = os.getenv("SECRET_KEY", "dev_secret_key")
 
 app = Flask(__name__)
 CORS(app)
 bcrypt = Bcrypt(app)
 
-# --- HYBRID DATABASE LOGIC ---
+# Database connection logic
 use_mongo = False
 db_client = None
 users_col = None
@@ -48,29 +49,29 @@ ram_db = {
 if mongo_uri:
     try:
         db_client = MongoClient(mongo_uri, serverSelectionTimeoutMS=3000)
-        db_client.server_info() # Trigger connection check
-        print("✅ CONNECTED TO MONGODB ATLAS")
+        db_client.server_info() 
+        print("Connected to MongoDB Atlas")
         
         db = db_client.medsim_db
         users_col = db.users
         sessions_col = db.sessions
         use_mongo = True
     except ServerSelectionTimeoutError:
-        print("⚠️ MONGODB CONNECTION FAILED. Falling back to In-Memory mode.")
+        print("MongoDB connection failed. Switching to RAM mode.")
         use_mongo = False
 else:
-    print("⚠️ NO MONGO_URI FOUND. Using In-Memory mode.")
+    print("No Mongo URI found. Switching to RAM mode.")
     use_mongo = False
 
 
-# --- AUTH ROUTES ---
+# --- Auth Routes ---
 
 @app.route('/register', methods=['POST'])
 def register():
     data = request.json
     username = data.get('username')
     password = data.get('password')
-    
+
     if not username or not password:
         return jsonify({"error": "Missing fields"}), 400
     
@@ -85,19 +86,18 @@ def register():
             "password": hashed_pw, 
             "created_at": datetime.datetime.now()
         }).inserted_id
+        
         return jsonify({"message": "User created", "user_id": str(uid)}), 201
     else:
         for u in ram_db["users"]:
             if u["username"] == username:
                 return jsonify({"error": "User already exists"}), 400
         
-        new_user = {
-            "_id": "user_" + str(len(ram_db["users"])),
-            "username": username,
-            "password": hashed_pw
-        }
+        new_id = f"user_{len(ram_db['users'])}"
+        new_user = {"_id": new_id, "username": username, "password": hashed_pw}
         ram_db["users"].append(new_user)
-        return jsonify({"message": "User created (RAM)", "user_id": new_user["_id"]}), 201
+        return jsonify({"message": "User created (RAM)", "user_id": new_id}), 201
+
 
 @app.route('/login', methods=['POST'])
 def login():
@@ -106,7 +106,6 @@ def login():
     password = data.get('password')
     
     user = None
-    
     if use_mongo:
         user = users_col.find_one({"username": username})
     else:
@@ -132,30 +131,35 @@ def login():
     return jsonify({"error": "Invalid credentials"}), 401
 
 
-# --- HELPER FUNCTIONS ---
+# --- Helper Functions ---
 
 def get_llm(temp=0.7):
+    selected_key = random.choice(api_keys)
     return ChatGroq(
-        api_key=random.choice(api_keys), 
+        api_key=selected_key, 
         model="llama-3.1-8b-instant", 
         temperature=temp
     )
 
-def parse_json(text):
+def clean_json_output(text):
     text = re.sub(r'```json\s*|```', '', text).strip()
-    start, end = text.find('{'), text.rfind('}') + 1
-    if start != -1 and end != -1:
-        return json.loads(text[start:end])
+    start_idx = text.find('{')
+    end_idx = text.rfind('}') + 1
+    if start_idx != -1 and end_idx != -1:
+        return json.loads(text[start_idx:end_idx])
     return {}
 
-# --- CREATOR AGENT ---
 
-def generate_patient():
-    print("🧬 Generating FRESH patient case...")
+# --- Patient Generation ---
+
+def create_patient_profile():
+    print("Generating new patient profile...")
     llm = get_llm(1.0) 
+    
     prompt = """
     Create a realistic medical patient profile.
-    RULES: Avoid common colds. Pick distinct conditions (e.g., IBS, Migraine, Eczema, Sciatica).
+    Avoid common colds. Pick distinct conditions (e.g., IBS, Migraine, Eczema, Sciatica, STI).
+    
     Return ONLY valid JSON:
     {
         "name": "First Name",
@@ -168,12 +172,15 @@ def generate_patient():
         "treatment": ["Correct Meds"]
     }
     """
+    
     try:
-        p = parse_json(llm.invoke(prompt).content)
-        if isinstance(p.get('visible_symptoms'), str): 
-            p['visible_symptoms'] = [p['visible_symptoms']]
-        return p
-    except:
+        response = llm.invoke(prompt).content
+        profile = clean_json_output(response)
+        if isinstance(profile.get('visible_symptoms'), str):
+            profile['visible_symptoms'] = [profile['visible_symptoms']]
+        return profile
+    except Exception as e:
+        # Fallback profile
         return {
             "name": "Alex", "age": 30, "sex": "Male", 
             "disease": "Migraine", 
@@ -183,11 +190,8 @@ def generate_patient():
             "treatment": ["Triptans"]
         }
 
-def get_system_prompt(p):
-    """
-    STRICT NO-DRAMA PROMPT
-    This ensures the bot speaks like a normal person texting, not an actor.
-    """
+def build_system_prompt(p):
+    # STRICT TEXTING STYLE PROMPT
     return f"""
     ROLE: You are {p['name']}, {p['age']} years old, {p['sex']}.
     CONTEXT: You are messaging a doctor on a chat app.
@@ -205,39 +209,43 @@ def get_system_prompt(p):
     1. Say: "Okay, I'll try that." or "Thanks doc."
     2. STOP complaining.
     
-    === STRICT BEHAVIOR RULES ===
-    1. NO ACTING: Do NOT use asterisks (*sigh*, *looks down*). Do NOT describe your actions. Just type words.
-    2. TEXTING STYLE: Keep sentences short and casual.
-    3. NO INFO DUMPING: Only mention your Main Symptom at first. Make the doctor ask for more.
+    === STRICT BEHAVIOR RULES (CRITICAL) ===
+    1. NO ACTING: Do NOT use asterisks (*sigh*, *looks down*). Do NOT describe your physical actions. 
+    2. TEXTING STYLE: Type like a normal person texting. Short sentences. Casual.
+    3. ONE THING AT A TIME: Do NOT list all your symptoms at once.
        - BAD: "Hi, I have a headache, nausea, and my eye hurts."
        - GOOD: "Hi doc, I've had this really bad headache all day."
-    4. UNKNOWN: If asked about history not in your profile, say "No" or "I don't think so."
+    4. WAIT FOR QUESTIONS: Only reveal secondary symptoms if the doctor asks "Anything else?" or "Does it hurt anywhere else?"
+    5. UNKNOWN: If asked about history not in your profile, say "No" or "I don't think so."
     
     Start now. Wait for the doctor to speak.
     """
 
 
-# --- ACTOR AGENT ---
+# --- Chat Logic ---
 
-class State(TypedDict):
+class AgentState(TypedDict):
     messages: Annotated[List, operator.add]
 
-def bot_node(state: State):
+def bot_response_node(state: AgentState):
     try:
-        # Lower temp (0.4) reduces chance of "hallucinating" drama
-        return {"messages": [get_llm(0.4).invoke(state["messages"])]}
+        # Use low temp (0.3) to prevent "creative" acting/drama
+        llm = get_llm(0.3)
+        response = llm.invoke(state["messages"])
+        return {"messages": [response]}
     except:
         return {"messages": [HumanMessage(content="...")]}
 
-workflow = StateGraph(State)
-workflow.add_node("patient", bot_node)
+workflow = StateGraph(AgentState)
+workflow.add_node("patient", bot_response_node)
 workflow.set_entry_point("patient")
 workflow.add_edge("patient", END)
+
 memory = MemorySaver()
 agent = workflow.compile(checkpointer=memory)
 
 
-# --- CHAT ROUTES ---
+# --- Routes ---
 
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -261,15 +269,15 @@ def chat():
                 session = s
                 break
     
+    # New Session Logic
     if not session:
-        # Create new session
-        p = generate_patient()
+        profile = create_patient_profile()
         new_session = {
             "thread_id": tid, 
             "user_id": uid, 
-            "patient_name": p['name'], 
-            "disease": p['disease'],
-            "patient_data": p, 
+            "patient_name": profile['name'], 
+            "disease": profile['disease'], 
+            "patient_data": profile, 
             "messages": [], 
             "created_at": datetime.datetime.now()
         }
@@ -279,44 +287,50 @@ def chat():
         else:
             ram_db["sessions"].append(new_session)
             
-        inputs = [SystemMessage(content=get_system_prompt(p)), HumanMessage(content=msg)]
-        current_p = p
+        # Seed conversation
+        inputs = [
+            SystemMessage(content=build_system_prompt(profile)), 
+            HumanMessage(content=msg)
+        ]
+        current_profile = profile
     else:
         # Continue session
-        current_p = session['patient_data']
+        current_profile = session['patient_data']
         inputs = [HumanMessage(content=msg)]
 
     try:
-        res = agent.invoke({"messages": inputs}, config=config)
-        bot_response = res["messages"][-1].content
+        result = agent.invoke({"messages": inputs}, config=config)
+        bot_text = result["messages"][-1].content
         
         # Save history
-        new_msgs = [
-            {"role": "Doctor", "content": msg},
-            {"role": "Patient", "content": bot_response}
+        new_messages = [
+            {"role": "Doctor", "content": msg}, 
+            {"role": "Patient", "content": bot_text}
         ]
         
         if use_mongo:
             sessions_col.update_one(
-                {"thread_id": tid},
-                {"$push": {"messages": {"$each": new_msgs}}}
+                {"thread_id": tid}, 
+                {"$push": {"messages": {"$each": new_messages}}}
             )
         else:
             for s in ram_db["sessions"]:
                 if s["thread_id"] == tid:
-                    s["messages"].extend(new_msgs)
+                    s["messages"].extend(new_messages)
                     break
                     
         return jsonify({
-            "response": bot_response,
+            "response": bot_text, 
             "patient_info": {
-                "name": current_p["name"], 
-                "age": current_p["age"], 
-                "sex": current_p["sex"]
+                "name": current_profile["name"], 
+                "age": current_profile["age"], 
+                "sex": current_profile["sex"]
             }
         })
+        
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
+
 
 @app.route('/sessions/<user_id>', methods=['GET'])
 def get_sessions(user_id):
@@ -324,18 +338,16 @@ def get_sessions(user_id):
     
     if use_mongo:
         cursor = sessions_col.find({"user_id": user_id}).sort("created_at", -1)
-        for doc in cursor:
-            results.append({
-                "thread_id": doc["thread_id"], 
-                "patient": doc["patient_name"], 
-                "disease": doc["disease"]
-            })
+        results = [
+            {"thread_id": doc["thread_id"], "patient": doc["patient_name"], "disease": doc["disease"]} 
+            for doc in cursor
+        ]
     else:
         for s in reversed(ram_db["sessions"]):
             if s["user_id"] == user_id:
                 results.append({
-                    "thread_id": s["thread_id"],
-                    "patient": s["patient_name"],
+                    "thread_id": s["thread_id"], 
+                    "patient": s["patient_name"], 
                     "disease": s["disease"]
                 })
                 
