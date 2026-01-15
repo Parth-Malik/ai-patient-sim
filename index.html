@@ -3,40 +3,56 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Virtual Patient</title>
+    <title>MedSim Pro</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-    <div class="main-content">
+    <div id="authContainer" class="auth-container">
+        <div class="auth-box">
+            <h1 id="authTitle">Doctor Login</h1>
+            <input type="text" id="authUsername" placeholder="Username">
+            <input type="password" id="authPassword" placeholder="Password">
+            <button class="auth-btn" onclick="handleLogin()">Login</button>
+            <p class="switch-text" onclick="toggleAuthMode()">New here? Create Profile</p>
+            <p id="authError" class="error-text"></p>
+        </div>
+    </div>
+
+    <div id="appContainer" class="main-content hidden">
+        
         <div class="chat-header">
-            <div class="brand-title">Patient Room</div>
+            <div class="header-left">
+                <div class="brand-title">MedSim Pro</div>
+                <div class="header-info" id="doctorNameDisplay">Dr. Unknown</div>
+            </div>
             
             <div class="header-actions">
-                <button class="action-btn end-btn" onclick="endSession()">End Session</button>
+                <button class="action-btn history-btn" onclick="toggleHistory()">📂 Logs</button>
+                <button class="action-btn end-btn" onclick="logout()">Logout</button>
                 <button class="action-btn new-btn" onclick="startNewSession()">New Patient</button>
             </div>
         </div>
 
         <div class="chat-box" id="chatBox">
             <div class="message bot">
-                (The patient is waiting...)
-                <br><br>
-                "Hello doctor."
+                (Patient waiting...) <br> "Hello doctor."
             </div>
         </div>
 
-        <div class="input-area" id="inputArea">
+        <div class="input-area">
             <input type="text" id="userInput" placeholder="Type your question here...">
             <button class="send-btn" id="sendBtn">Send</button>
         </div>
+    </div>
 
-        <div id="endOverlay" class="overlay hidden">
-            <div class="overlay-content">
-                <h2>Simulation Ended</h2>
-                <p>The session is closed. You can no longer interact with this patient.</p>
-                <button class="restart-btn" onclick="startNewSession()">Start New Case</button>
-            </div>
+    <div id="historySidebar" class="sidebar">
+        <div class="sidebar-header">
+            <h3>Patient History</h3>
+            <button class="close-btn" onclick="toggleHistory()">×</button>
+        </div>
+        <div id="historyList" class="history-list">
+            <p style="text-align:center; color:#666; margin-top: 20px;">Loading...</p>
         </div>
     </div>
 
