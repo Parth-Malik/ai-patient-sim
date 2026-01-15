@@ -1,25 +1,55 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
 
+/* GLOBAL RESET */
 body {
     background-color: #f3f4f6;
     font-family: 'Inter', sans-serif;
     margin: 0;
     height: 100vh;
+    overflow: hidden; /* Prevents double scrollbars */
+}
+
+/* --- AUTH SCREEN --- */
+.auth-container {
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: linear-gradient(135deg, #6366f1 0%, #a5b4fc 100%);
     display: flex;
     justify-content: center;
     align-items: center;
+    z-index: 100;
 }
 
+.auth-box {
+    background: white;
+    padding: 40px;
+    border-radius: 16px;
+    width: 350px;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+    text-align: center;
+}
+.auth-box input {
+    width: 100%; padding: 12px; margin-bottom: 15px;
+    border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box;
+}
+.auth-btn {
+    width: 100%; background: #4f46e5; color: white; padding: 12px;
+    border: none; border-radius: 8px; cursor: pointer; font-weight: 600;
+}
+.switch-text { margin-top: 15px; color: #6b7280; font-size: 0.9rem; cursor: pointer; text-decoration: underline; }
+.error-text { color: red; margin-top: 10px; font-size: 0.9rem; }
+.hidden { display: none !important; }
+
+/* --- MAIN APP LAYOUT --- */
 .main-content {
     width: 100%;
     height: 100vh;
     background-color: #fff;
     display: flex;
     flex-direction: column;
-    position: relative; /* For overlay positioning */
 }
 
-/* --- HEADER --- */
+/* HEADER */
 .chat-header {
     background: white;
     height: 70px;
@@ -27,58 +57,58 @@ body {
     border-bottom: 1px solid #e5e7eb;
     display: flex;
     align-items: center;
-    justify-content: space-between; /* Space out title and buttons */
+    justify-content: space-between;
+    flex-shrink: 0; /* Prevents header from squishing */
 }
 
-.brand-title {
-    font-size: 1.2rem;
-    font-weight: 700;
-    color: #1f2937;
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 20px;
 }
+
+.brand-title { font-size: 1.3rem; font-weight: 700; color: #1f2937; }
+.header-info { font-size: 1rem; color: #4b5563; font-weight: 500; }
 
 .header-actions {
     display: flex;
-    gap: 10px;
+    gap: 12px;
 }
 
-/* Action Buttons */
+/* BUTTONS */
 .action-btn {
     padding: 8px 16px;
-    border: none;
-    border-radius: 6px;
-    font-weight: 500;
-    cursor: pointer;
-    font-size: 0.9rem;
-    transition: opacity 0.2s;
+    border: none; border-radius: 6px; font-weight: 600;
+    cursor: pointer; font-size: 0.9rem; transition: opacity 0.2s;
 }
-
+.history-btn { background-color: #f3f4f6; color: #374151; border: 1px solid #d1d5db; }
 .new-btn { background-color: #4f46e5; color: white; }
 .end-btn { background-color: #fee2e2; color: #dc2626; border: 1px solid #fecaca; }
 .action-btn:hover { opacity: 0.8; }
 
-/* --- CHAT AREA --- */
+/* CHAT BOX */
 .chat-box {
     flex: 1;
     padding: 30px 20%;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 15px;
     background-color: #f9fafb;
 }
 
 .message {
-    padding: 16px 20px;
+    padding: 12px 18px;
     border-radius: 12px;
     max-width: 60%;
     line-height: 1.5;
     font-size: 1rem;
+    position: relative;
 }
-
 .bot { background-color: white; border: 1px solid #e5e7eb; align-self: flex-start; color: #1f2937; }
 .user { background-color: #4f46e5; color: white; align-self: flex-end; }
 
-/* --- INPUT AREA --- */
+/* INPUT AREA */
 .input-area {
     padding: 20px 20%;
     background: white;
@@ -87,61 +117,39 @@ body {
     gap: 15px;
     height: 80px;
     align-items: center;
+    flex-shrink: 0;
 }
-
-/* Disabled state for End Session */
-.input-area.disabled { opacity: 0.5; pointer-events: none; }
-
-input {
-    flex: 1;
-    padding: 16px;
-    border: 1px solid #d1d5db;
-    border-radius: 8px;
-    font-size: 1rem;
-    outline: none;
-}
+input { flex: 1; padding: 14px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 1rem; outline: none; }
 input:focus { border-color: #4f46e5; }
+.send-btn { background-color: #4f46e5; color: white; border: none; padding: 0 30px; height: 48px; border-radius: 8px; font-weight: 600; cursor: pointer; }
 
-.send-btn {
-    background-color: #4f46e5;
-    color: white;
-    border: none;
-    padding: 0 30px;
-    height: 52px;
-    border-radius: 8px;
-    font-weight: 600;
-    cursor: pointer;
-}
-
-/* --- OVERLAY (END SESSION) --- */
-.overlay {
-    position: absolute;
-    top: 0; left: 0; width: 100%; height: 100%;
-    background: rgba(0, 0, 0, 0.5);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    z-index: 50;
-    backdrop-filter: blur(2px);
-}
-
-.hidden { display: none; }
-
-.overlay-content {
+/* --- SIDEBAR --- */
+.sidebar {
+    position: fixed;
+    top: 0; right: -400px; /* Hidden off-screen */
+    width: 350px;
+    height: 100%;
     background: white;
-    padding: 40px;
-    border-radius: 16px;
-    text-align: center;
-    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+    box-shadow: -5px 0 15px rgba(0,0,0,0.1);
+    transition: right 0.3s ease;
+    z-index: 200;
+    display: flex;
+    flex-direction: column;
 }
+.sidebar.open { right: 0; }
 
-.restart-btn {
-    margin-top: 20px;
-    background-color: #4f46e5;
-    color: white;
-    border: none;
-    padding: 12px 24px;
-    border-radius: 8px;
-    font-weight: 600;
-    cursor: pointer;
+.sidebar-header {
+    padding: 20px;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex; justify-content: space-between; align-items: center;
+    background: #f9fafb;
 }
+.close-btn { background: none; border: none; font-size: 2rem; cursor: pointer; color: #6b7280; }
+
+.history-list { flex: 1; overflow-y: auto; padding: 20px; }
+.history-item {
+    background: #fff; border: 1px solid #e5e7eb; padding: 15px; margin-bottom: 10px;
+    border-radius: 8px; border-left: 4px solid #4f46e5;
+}
+.history-item h4 { margin: 0 0 5px 0; color: #1f2937; }
+.history-item p { margin: 0; font-size: 0.9rem; color: #6b7280; }
