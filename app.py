@@ -44,11 +44,11 @@ def generate_patient():
     llm = get_llm(1.0) 
     
     prompt = """
-    Create a realistic medical patient profile.
+    Create a detailed, realistic medical patient profile.
     
     RULES:
-    1. AVOID common colds/flu. Pick distinct conditions (e.g., GERD, Migraine, Arthritis, Bronchitis).
-    2. "Speech Style" must be: "Brief", "Direct", or "Quiet".
+    1. AVOID common colds/flu. Pick distinct conditions (e.g., Carpal Tunnel, Sciatica, Gastritis, Vertigo, Eczema).
+    2. "Speech Style" should be natural and descriptive (e.g., "Casual", "Detailed", "Polite but worried").
     
     Return ONLY valid JSON:
     {
@@ -58,8 +58,8 @@ def generate_patient():
         "disease": "Specific Condition",
         "visible_symptoms": ["Main Symptom", "Secondary Symptom"],
         "secret_symptom": "A critical clue (only reveal if specifically asked)",
-        "pain_level": Integer (1-10),
-        "speech_style": "Brief/Direct",
+        "pain_description": "Adjectives describing the pain (e.g. throbbing, sharp, dull, burning)",
+        "speech_style": "Natural/Casual",
         "treatment": ["Correct Meds/Action"]
     }
     """
@@ -74,17 +74,17 @@ def generate_patient():
         print(f"⚠️ Generation Error: {e}")
         return {
             "name": "Alex", "age": 30, "sex": "Male",
-            "disease": "Strep Throat", 
-            "visible_symptoms": ["Sore throat", "Fever"], 
-            "secret_symptom": "White patches in throat", 
-            "pain_level": 7,
-            "speech_style": "Quiet",
-            "treatment": ["Antibiotics"]
+            "disease": "Tension Headache", 
+            "visible_symptoms": ["Headache", "Neck stiffness"], 
+            "secret_symptom": "Stress at work", 
+            "pain_description": "A tight band squeezing my head",
+            "speech_style": "Tired",
+            "treatment": ["Rest", "Ibuprofen"]
         }
 
 def get_system_prompt(p):
     """
-    The 'Compliant Patient' Prompt.
+    The 'Descriptive but Natural' Prompt.
     """
     return f"""
     ROLE: You are {p['name']}, {p['age']} years old, {p['sex']}.
@@ -92,23 +92,23 @@ def get_system_prompt(p):
     === YOUR REALITY ===
     CONDITION: {p['disease']} (NEVER say this name).
     SYMPTOMS: {", ".join(p['visible_symptoms'])}.
+    PAIN FEELS LIKE: {p.get('pain_description', 'uncomfortable')}.
     SECRET: {p['secret_symptom']} (Only tell if asked).
     
-    === THE CURE (CRITICAL) ===
+    === THE CURE ===
     The ONLY thing that helps is: {', '.join(p['treatment'])}.
+    If the doctor suggests this:
+    1. ACCEPT IT NATURALLY.
+    2. Say something like: "That makes sense, I'll try that." or "Okay, thanks doc."
     
-    *** INSTRUCTION ON ACCEPTING TREATMENT ***
-    If the doctor suggests {', '.join(p['treatment'])} (or similar):
-    1. YOU MUST ACCEPT IT. Do not argue.
-    2. Say something natural like: "Okay, I'll take that." or "That sounds good, thank you."
-    3. Stop complaining after accepting.
-    
-    === CONVERSATION STYLE ===
-    1. BE CONCISE: Use short sentences (1-2 max).
-    2. BE DIRECT: No storytelling.
-    3. BE HUMAN: Say "It hurts" instead of "I have pain."
-    4. START VAGUE: Mention only your main symptom first.
-    5. UNKNOWN: If asked about things not in your profile, say "I don't know."
+    === CONVERSATION STYLE (CRITICAL) ===
+    1. BE DESCRIPTIVE, NOT DRAMATIC: Do not use *gasps* or *sighs*. Do not yell.
+    2. USE SENSORY DETAILS: When asked about pain, describe *how* it feels. 
+       - Bad: "It hurts."
+       - Good: "It's a dull throbbing that won't go away." or "It feels like a burning sensation."
+    3. NATURAL PHRASING: Speak like a normal person texting. You can use 2-3 sentences to explain yourself.
+    4. START VAGUE: Mention the main issue first. Let the doctor ask follow-up questions.
+    5. UNKNOWN: If asked about medical history not in your profile, just say "No" or "I don't think so."
     
     Start now. Wait for the doctor to speak.
     """
@@ -118,9 +118,9 @@ class State(TypedDict):
     messages: Annotated[List, operator.add]
 
 def bot_node(state: State):
-    # Temp 0.5 balances acting natural with following the acceptance rules
+    # Temp 0.6 allows for descriptive language without going off-script
     try:
-        return {"messages": [get_llm(0.5).invoke(state["messages"])]}
+        return {"messages": [get_llm(0.6).invoke(state["messages"])]}
     except:
         return {"messages": [HumanMessage(content="...")]}
 
