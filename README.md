@@ -1,8 +1,3 @@
-I apologize for the confusion. The "gibberish" you saw (like `<div>` and `align="center"`) was HTML code mixed with Markdown to make the text center-aligned and add logos. If you prefer a **clean, standard** version that is easy to read and edit, use this one.
-
-Copy the text inside the box below. It uses standard formatting that works everywhere (GitHub, GitLab, Bitbucket).
-
----
 
 # MedSim Pro: Autonomous Medical Training Environment
 
